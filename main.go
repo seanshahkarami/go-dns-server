@@ -26,38 +26,45 @@ var aresources = map[dnsmessage.Name]*dnsmessage.AResource{
 	dnsmessage.MustNewName("terraria.org."): &dnsmessage.AResource{A: [4]byte{104, 22, 6, 117}},
 }
 
-func handleMessage(conn net.PacketConn, data []byte, from net.Addr) error {
+func handleMessage(conn net.PacketConn, data []byte, from net.Addr) {
 	var msg dnsmessage.Message
 
 	if err := msg.Unpack(data); err != nil {
-		return err
+		log.Printf("invalid message from %v\n", from)
+		return
 	}
 
 	if msg.Header.Response {
-		log.Printf("response from %v\n", from)
-
-		for _, a := range msg.Answers {
-			switch r := a.Body.(type) {
-			case *dnsmessage.AResource:
-				aresources[a.Header.Name] = r
-			default:
-				log.Printf("unexpected answer %v\n", a)
-			}
-		}
+		handleResponse(conn, &msg, from)
 	} else {
-		log.Printf("request from %v\n", from)
+		handleRequest(conn, &msg, from)
+	}
+}
 
-		for _, q := range msg.Questions {
-			switch q.Type {
-			case dnsmessage.TypeA:
-				handleResourceA(conn, msg.Header, q, from)
-			default:
-				handleNotImplemented(conn, msg.Header, q, from)
-			}
+func handleRequest(conn net.PacketConn, msg *dnsmessage.Message, from net.Addr) {
+	log.Printf("request from %v\n", from)
+
+	for _, q := range msg.Questions {
+		switch q.Type {
+		case dnsmessage.TypeA:
+			handleResourceA(conn, msg.Header, q, from)
+		default:
+			handleNotImplemented(conn, msg.Header, q, from)
 		}
 	}
+}
 
-	return nil
+func handleResponse(conn net.PacketConn, msg *dnsmessage.Message, from net.Addr) {
+	log.Printf("response from %v\n", from)
+
+	for _, a := range msg.Answers {
+		switch r := a.Body.(type) {
+		case *dnsmessage.AResource:
+			aresources[a.Header.Name] = r
+		default:
+			log.Printf("unexpected answer %v\n", a)
+		}
+	}
 }
 
 func handleResourceA(conn net.PacketConn, h dnsmessage.Header, q dnsmessage.Question, from net.Addr) {
@@ -135,8 +142,6 @@ func main() {
 			log.Fatal(err)
 		}
 
-		if err := handleMessage(conn, buf[:n], from); err != nil {
-			log.Printf("error %s\n", err)
-		}
+		handleMessage(conn, buf[:n], from)
 	}
 }
